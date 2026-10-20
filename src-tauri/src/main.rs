@@ -226,9 +226,8 @@ mod hook {
 /// Obtiene los archivos actualmente seleccionados en el Explorador de Windows o en el Escritorio
 #[cfg(windows)]
 fn get_selected_files() -> Vec<String> {
-    use windows::core::Interface;
+    use windows::core::{Interface, VARIANT};
     use windows::Win32::System::Com::*;
-    use windows::Win32::System::Variant::*;
     use windows::Win32::UI::Shell::*;
 
     let mut results = Vec::new();
@@ -246,9 +245,9 @@ fn get_selected_files() -> Vec<String> {
             if let Ok(disp) = sw.FindWindowSW(
                 &vtloc,
                 &vtempty,
-                SWC_DESKTOP.0,
+                SWC_DESKTOP,
                 &mut hwnd_val,
-                SWFO_NEEDDISPATCH.0 as u32,
+                SWFO_NEEDDISPATCH,
             ) {
                 if let Ok(provider) = disp.cast::<IServiceProvider>() {
                     if let Ok(browser) = provider.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) {
@@ -264,9 +263,7 @@ fn get_selected_files() -> Vec<String> {
             // 2. Ventanas abiertas del Explorador
             if let Ok(count) = sw.Count() {
                 for i in 0..count {
-                    let mut vti = VARIANT::default();
-                    vti.Anonymous.Anonymous.vt = VARENUM(3); // VT_I4 = 3
-                    vti.Anonymous.Anonymous.Anonymous.lVal = i;
+                    let vti = VARIANT::from(i);
                     if let Ok(disp) = sw.Item(&vti) {
                         if let Ok(provider) = disp.cast::<IServiceProvider>() {
                             if let Ok(browser) = provider.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) {
