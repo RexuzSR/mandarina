@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
-use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager};
+use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Emitter, Manager};
 
 const IMG: &[&str] = &["png", "jpg", "webp", "bmp", "gif", "tiff", "ico"];
 const AUD: &[&str] = &["mp3", "wav", "flac", "ogg", "m4a", "aac"];
@@ -223,7 +223,94 @@ mod hook {
     }
 }
 
-/// Vigila: botón izquierdo + Shift y movimiento > 12 px => muestra el overlay que recibe el arrastre.
+/// Obtiene los archivos actualmente seleccionados en el Explorador de Windows o en el Escritorio
+#[cfg(windows)]
+fn get_selected_files() -> Vec<String> {
+    use windows::core::Interface;
+    use windows::Win32::System::Com::*;
+    use windows::Win32::System::Variant::*;
+    use windows::Win32::UI::Shell::*;
+
+    let mut results = Vec::new();
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        if let Ok(sw) = CoCreateInstance::<_, IShellWindows>(&ShellWindows, None, CLSCTX_ALL) {
+            let mut views = Vec::new();
+
+            // 1. Escritorio
+            let mut dispatch = None;
+            let vtloc = VARIANT::from(0i32);
+            let vtempty = VARIANT::new();
+            let mut hwnd_val = 0i32;
+
+            let _ = sw.FindWindowSW(
+                &vtloc,
+                &vtempty,
+                SWC_DESKTOP,
+                &mut hwnd_val,
+                SWFO_NEEDDISPATCH,
+                &mut dispatch,
+            );
+
+            if let Some(disp) = dispatch {
+                if let Ok(provider) = disp.cast::<IServiceProvider>() {
+                    if let Ok(browser) = provider.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) {
+                        if let Ok(view) = browser.QueryActiveShellView() {
+                            if let Ok(fv) = view.cast::<IFolderView>() {
+                                views.push(fv);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Ventanas abiertas del Explorador
+            if let Ok(count) = sw.Count() {
+                for i in 0..count {
+                    let vti = VARIANT::from(i);
+                    if let Ok(disp) = sw.Item(&vti) {
+                        if let Ok(provider) = disp.cast::<IServiceProvider>() {
+                            if let Ok(browser) = provider.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) {
+                                if let Ok(view) = browser.QueryActiveShellView() {
+                                    if let Ok(fv) = view.cast::<IFolderView>() {
+                                        views.push(fv);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Extraer elementos seleccionados
+            for fv in views {
+                if let Ok(item_array) = fv.Items::<IShellItemArray>(SVGIO_SELECTION.0 as u32) {
+                    if let Ok(count) = item_array.GetCount() {
+                        if count > 0 {
+                            for idx in 0..count {
+                                if let Ok(item) = item_array.GetItemAt(idx) {
+                                    if let Ok(path) = item.GetDisplayName(SIGDN_FILESYSPATH) {
+                                        let s = path.to_string_lossy();
+                                        if !s.is_empty() && !results.contains(&s) {
+                                            results.push(s);
+                                        }
+                                    }
+                                }
+                            }
+                            if !results.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
+/// Vigila: botón izquierdo + Shift y movimiento > 12 px => muestra el overlay y abre el menú radial.
 #[cfg(windows)]
 fn watcher(app: tauri::AppHandle) {
     use std::{thread::sleep, time::Duration};
@@ -250,7 +337,13 @@ fn watcher(app: tauri::AppHandle) {
             continue
         };
         if !l {
-            if shown { sleep(Duration::from_millis(150)); let _ = w.hide(); shown = false; log("overlay oculto"); }
+            if shown {
+                let _ = w.emit("mouse_up", ());
+                sleep(Duration::from_millis(150));
+                let _ = w.hide();
+                shown = false;
+                log("overlay oculto");
+            }
             start = None;
             continue;
         }
@@ -263,6 +356,8 @@ fn watcher(app: tauri::AppHandle) {
         if !sh { continue; }
         if let Some((sx, sy)) = start {
             if (x - sx).abs().max((y - sy).abs()) > 12 {
+                let files = get_selected_files();
+                log(&format!("archivos seleccionados: {files:?}"));
                 let (vx, vy, vw, vh) = unsafe { (
                     GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
                     GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)) };
@@ -270,6 +365,13 @@ fn watcher(app: tauri::AppHandle) {
                 let _ = w.set_size(tauri::PhysicalSize::new(vw as u32, vh as u32));
                 let r = w.show(); log(&format!("overlay show ok={} en {vx},{vy} {vw}x{vh}", r.is_ok()));
                 shown = true;
+                if !files.is_empty() {
+                    let _ = w.emit("open_radial", serde_json::json!({
+                        "paths": files,
+                        "x": x,
+                        "y": y
+                    }));
+                }
             }
         }
     }
