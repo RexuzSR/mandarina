@@ -188,6 +188,41 @@ async fn convert(paths: Vec<String>, target: String) -> Result<Vec<String>, Stri
     r
 }
 
+/// Hook de ratón del sistema: sigue el botón izquierdo aunque Explorer esté arrastrando un archivo.
+#[cfg(windows)]
+mod hook {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    pub static LBTN: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "system" fn proc_(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if code >= 0 {
+            match wparam.0 as u32 {
+                WM_LBUTTONDOWN => LBTN.store(true, Ordering::SeqCst),
+                WM_LBUTTONUP => LBTN.store(false, Ordering::SeqCst),
+                _ => {}
+            }
+        }
+        CallNextHookEx(HHOOK::default(), code, wparam, lparam)
+    }
+
+    pub fn run() {
+        unsafe {
+            match SetWindowsHookExW(WH_MOUSE_LL, Some(proc_), HINSTANCE::default(), 0) {
+                Ok(_) => super::log("hook de raton instalado"),
+                Err(e) => { super::log(&format!("hook de raton fallo: {e}")); return; }
+            }
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, HWND::default(), 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+}
+
 /// Vigila: botón izquierdo + Shift y movimiento > 12 px => muestra el overlay que recibe el arrastre.
 #[cfg(windows)]
 fn watcher(app: tauri::AppHandle) {
@@ -201,24 +236,26 @@ fn watcher(app: tauri::AppHandle) {
     let mut start: Option<(i32, i32)> = None;
     let mut shown = false;
     log("watcher iniciado");
-    let (mut last_l, mut last_s, mut warned) = (false, false, false);
+    let (mut last_l, mut last_s, mut warned, mut last_a) = (false, false, false, false);
 
     loop {
         sleep(Duration::from_millis(15));
-        let (l, sh) = (down(VK_LBUTTON), down(VK_SHIFT));
+        let (al, sh) = (down(VK_LBUTTON), down(VK_SHIFT));
+        let l = hook::LBTN.load(std::sync::atomic::Ordering::SeqCst) || al;
+        if al != last_a { log(&format!("async izquierdo: {al}")); last_a = al; }
         if l != last_l { log(&format!("boton izquierdo: {l}")); last_l = l; }
         if sh != last_s { log(&format!("shift: {sh}")); last_s = sh; }
         let Some(w) = app.get_webview_window("overlay") else {
             if !warned { log("ventana overlay NO encontrada"); warned = true; }
             continue
         };
-        if !down(VK_LBUTTON) {
+        if !l {
             if shown { sleep(Duration::from_millis(150)); let _ = w.hide(); shown = false; log("overlay oculto"); }
             start = None;
             continue;
         }
         if shown { continue; }
-        if !down(VK_SHIFT) { start = None; continue; }
+        if !sh { start = None; continue; }
         let (x, y) = cursor();
         match start {
             None => { start = Some((x, y)); log("Shift+clic detectado"); }
@@ -250,7 +287,7 @@ fn main() {
                 .on_menu_event(|app, e| if e.id.as_ref() == "quit" { app.exit(0) })
                 .build(app)?;
             #[cfg(windows)]
-            { let h = app.handle().clone(); std::thread::spawn(move || watcher(h)); }
+            { std::thread::spawn(hook::run); let h = app.handle().clone(); std::thread::spawn(move || watcher(h)); }
             Ok(())
         })
         .run(tauri::generate_context!())
