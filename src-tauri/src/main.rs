@@ -17,6 +17,16 @@ fn ext(p: &str) -> String {
     match e.as_str() { "jpeg" => "jpg".into(), "tif" => "tiff".into(), "htm" => "html".into(), "markdown" => "md".into(), _ => e }
 }
 
+/// DIAGNÓSTICO: registro en %TEMP%\mandarina.log
+fn log(msg: &str) {
+    use std::io::Write;
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let p = std::env::temp_dir().join("mandarina.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) { let _ = writeln!(f, "{} {}", t % 1_000_000, msg); }
+}
+#[tauri::command]
+fn log_js(msg: String) { log(&format!("[js] {msg}")); }
+
 /// Formatos a los que puede convertirse el archivo (según su extensión).
 #[tauri::command]
 fn formats_for(path: String) -> Vec<String> {
@@ -190,12 +200,13 @@ fn watcher(app: tauri::AppHandle) {
     let cursor = || { let mut p = POINT::default(); unsafe { let _ = GetCursorPos(&mut p); } (p.x, p.y) };
     let mut start: Option<(i32, i32)> = None;
     let mut shown = false;
+    log("watcher iniciado");
 
     loop {
         sleep(Duration::from_millis(15));
         let Some(w) = app.get_webview_window("overlay") else { continue };
         if !down(VK_LBUTTON) {
-            if shown { sleep(Duration::from_millis(150)); let _ = w.hide(); shown = false; }
+            if shown { sleep(Duration::from_millis(150)); let _ = w.hide(); shown = false; log("overlay oculto"); }
             start = None;
             continue;
         }
@@ -203,14 +214,14 @@ fn watcher(app: tauri::AppHandle) {
         if !down(VK_SHIFT) { start = None; continue; }
         let (x, y) = cursor();
         match start {
-            None => start = Some((x, y)),
+            None => { start = Some((x, y)); log("Shift+clic detectado"); }
             Some((sx, sy)) if (x - sx).abs().max((y - sy).abs()) > 12 => {
                 let (vx, vy, vw, vh) = unsafe { (
                     GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
                     GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)) };
                 let _ = w.set_position(tauri::PhysicalPosition::new(vx, vy));
                 let _ = w.set_size(tauri::PhysicalSize::new(vw as u32, vh as u32));
-                let _ = w.show();
+                let r = w.show(); log(&format!("overlay show ok={} en {vx},{vy} {vw}x{vh}", r.is_ok()));
                 shown = true;
             }
             _ => {}
@@ -220,8 +231,9 @@ fn watcher(app: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![formats_for, convert])
+        .invoke_handler(tauri::generate_handler![formats_for, convert, log_js])
         .setup(|app| {
+            log("app iniciada");
             let quit = MenuItem::with_id(app, "quit", "Salir de Mandarina", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&quit])?;
             TrayIconBuilder::new()

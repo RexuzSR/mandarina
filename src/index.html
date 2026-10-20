@@ -2,7 +2,7 @@
 <html lang="es"><meta charset="utf-8"><title>Mandarina</title>
 <style>
   /* alpha 1%: invisible, pero la ventana sigue recibiendo el arrastre */
-  html,body{margin:0;height:100%;overflow:hidden;background:rgba(0,0,0,.01);
+  html,body{margin:0;height:100%;overflow:hidden;background:rgba(255,138,31,.18); /* DIAGNÓSTICO: tinte visible */
     font:600 13px "Segoe UI Variable","Segoe UI",system-ui,sans-serif;user-select:none}
   #menu{position:absolute;width:300px;height:300px;margin:-150px 0 0 -150px;display:none;pointer-events:none}
   svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 6px 18px rgba(0,0,0,.35))}
@@ -13,10 +13,14 @@
   #name{font-size:11px;font-weight:500;fill:#e9d9c8}
   .on-t{fill:#1c1816}
 </style>
+<div style="position:fixed;top:8px;left:8px;color:#fff;background:#c00;padding:4px 8px;font-size:12px">MANDARINA: MODO DIAGNÓSTICO</div>
 <div id="menu"><svg viewBox="-150 -150 300 300" id="svg"></svg></div>
 <script>
 const { invoke } = window.__TAURI__.core;
 const win = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+const log = m => invoke('log_js', { msg: String(m) }).catch(() => {});
+addEventListener('error', e => log('error: ' + e.message));
+log('pagina cargada');
 const R0 = 56, R1 = 140, menu = document.getElementById('menu'), svg = document.getElementById('svg');
 let paths = [], fmts = [], cx = 0, cy = 0, sel = -1;
 
@@ -48,6 +52,7 @@ const s = i => document.getElementById('s' + i), t = i => document.getElementByI
 const css = p => [p.x / devicePixelRatio, p.y / devicePixelRatio];
 
 win.onDragDropEvent(async ({ payload: p }) => {
+  if (p.type !== 'over') log('evento ' + p.type + ' ' + (p.paths || []).join('|'));
   if (p.type === 'enter') {
     paths = p.paths; sel = -1;
     fmts = await invoke('formats_for', { path: paths[0] });
@@ -64,6 +69,6 @@ win.onDragDropEvent(async ({ payload: p }) => {
     menu.style.display = 'none';
     if (i >= 0) invoke('convert', { paths, target: fmts[i] }).catch(e => console.error(e));
   } else { menu.style.display = 'none'; }
-});
+}).then(() => log('escuchando arrastres')).catch(e => log('onDragDropEvent fallo: ' + e));
 </script>
 </html>
