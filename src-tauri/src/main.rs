@@ -201,10 +201,17 @@ fn watcher(app: tauri::AppHandle) {
     let mut start: Option<(i32, i32)> = None;
     let mut shown = false;
     log("watcher iniciado");
+    let (mut last_l, mut last_s, mut warned) = (false, false, false);
 
     loop {
         sleep(Duration::from_millis(15));
-        let Some(w) = app.get_webview_window("overlay") else { continue };
+        let (l, sh) = (down(VK_LBUTTON), down(VK_SHIFT));
+        if l != last_l { log(&format!("boton izquierdo: {l}")); last_l = l; }
+        if sh != last_s { log(&format!("shift: {sh}")); last_s = sh; }
+        let Some(w) = app.get_webview_window("overlay") else {
+            if !warned { log("ventana overlay NO encontrada"); warned = true; }
+            continue
+        };
         if !down(VK_LBUTTON) {
             if shown { sleep(Duration::from_millis(150)); let _ = w.hide(); shown = false; log("overlay oculto"); }
             start = None;
