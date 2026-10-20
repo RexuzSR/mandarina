@@ -11,7 +11,7 @@
       "label": "overlay", "url": "index.html",
       "transparent": true, "decorations": false, "alwaysOnTop": true,
       "skipTaskbar": true, "visible": false, "focus": false,
-      "shadow": false, "resizable": false, "dragDropEnabled": true
+      "shadow": false, "resizable": false, "dragDropEnabled": false
     }]
   },
   "bundle": { "active": true, "targets": ["nsis"], "icon": ["icons/icon.ico", "icons/icon.png"] }

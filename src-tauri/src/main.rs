@@ -344,7 +344,11 @@ fn watcher(app: tauri::AppHandle) {
             start = None;
             continue;
         }
-        if shown { continue; }
+        if shown {
+            let (cx, cy) = cursor();
+            let _ = w.emit("cursor_move", serde_json::json!({ "x": cx, "y": cy }));
+            continue;
+        }
         let (x, y) = cursor();
         if start.is_none() {
             start = Some((x, y));
