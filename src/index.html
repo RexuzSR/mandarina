@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es"><meta charset="utf-8"><title>Mandarina</title>
+<style>
+  /* alpha 1%: invisible, pero la ventana sigue recibiendo el arrastre */
+  html,body{margin:0;height:100%;overflow:hidden;background:rgba(0,0,0,.01);
+    font:600 13px "Segoe UI Variable","Segoe UI",system-ui,sans-serif;user-select:none}
+  #menu{position:absolute;width:300px;height:300px;margin:-150px 0 0 -150px;display:none;pointer-events:none}
+  svg{width:100%;height:100%;overflow:visible;filter:drop-shadow(0 6px 18px rgba(0,0,0,.35))}
+  .seg{fill:rgba(28,24,22,.9);stroke:rgba(255,255,255,.1);stroke-width:1;transition:fill .08s}
+  .seg.on{fill:#ff8a1f}
+  text{fill:#fff;text-anchor:middle;dominant-baseline:central;font-size:14px;letter-spacing:.2px}
+  #hub{fill:rgba(28,24,22,.9)}
+  #name{font-size:11px;font-weight:500;fill:#e9d9c8}
+  .on-t{fill:#1c1816}
+</style>
+<div id="menu"><svg viewBox="-150 -150 300 300" id="svg"></svg></div>
+<script>
+const { invoke } = window.__TAURI__.core;
+const win = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+const R0 = 56, R1 = 140, menu = document.getElementById('menu'), svg = document.getElementById('svg');
+let paths = [], fmts = [], cx = 0, cy = 0, sel = -1;
+
+const pt = (r, a) => [r * Math.cos(a), r * Math.sin(a)];
+function seg(a0, a1) {
+  const [x0, y0] = pt(R1, a0), [x1, y1] = pt(R1, a1), [x2, y2] = pt(R0, a1), [x3, y3] = pt(R0, a0);
+  return `M${x0},${y0}A${R1},${R1} 0 0 1 ${x1},${y1}L${x2},${y2}A${R0},${R0} 0 0 0 ${x3},${y3}Z`;
+}
+function build(name) {
+  const n = fmts.length, step = 2 * Math.PI / n, g = 0.03;
+  svg.innerHTML = fmts.map((f, i) => {
+    const a0 = -Math.PI / 2 + i * step + g, a1 = a0 + step - 2 * g, [tx, ty] = pt((R0 + R1) / 2, (a0 + a1) / 2);
+    return `<path class="seg" id="s${i}" d="${seg(a0, a1)}"/><text id="t${i}" x="${tx}" y="${ty}">${f.toUpperCase()}</text>`;
+  }).join('') + `<circle id="hub" r="${R0 - 8}"/><text id="name" y="0">${name}</text>`;
+}
+function hit(x, y) {
+  const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy);
+  if (d < R0 || d > R1 + 50) return -1;
+  const a = (Math.atan2(dy, dx) + Math.PI / 2 + 2 * Math.PI) % (2 * Math.PI);
+  return Math.floor(a / (2 * Math.PI / fmts.length));
+}
+function mark(i) {
+  if (i === sel) return;
+  if (sel >= 0) { s(sel).classList.remove('on'); t(sel).classList.remove('on-t'); }
+  if (i >= 0) { s(i).classList.add('on'); t(i).classList.add('on-t'); }
+  sel = i;
+}
+const s = i => document.getElementById('s' + i), t = i => document.getElementById('t' + i);
+const css = p => [p.x / devicePixelRatio, p.y / devicePixelRatio];
+
+win.onDragDropEvent(async ({ payload: p }) => {
+  if (p.type === 'enter') {
+    paths = p.paths; sel = -1;
+    fmts = await invoke('formats_for', { path: paths[0] });
+    if (!fmts.length) return;
+    const [x, y] = css(p.position);
+    cx = Math.min(Math.max(x, 170), innerWidth - 170); cy = Math.min(Math.max(y, 170), innerHeight - 170);
+    menu.style.left = cx + 'px'; menu.style.top = cy + 'px';
+    build(paths[0].split(/[\\/]/).pop().slice(0, 14));
+    menu.style.display = 'block';
+  } else if (p.type === 'over') {
+    if (fmts.length) mark(hit(...css(p.position)));
+  } else if (p.type === 'drop') {
+    const i = fmts.length ? hit(...css(p.position)) : -1;
+    menu.style.display = 'none';
+    if (i >= 0) invoke('convert', { paths, target: fmts[i] }).catch(e => console.error(e));
+  } else { menu.style.display = 'none'; }
+});
+</script>
+</html>
