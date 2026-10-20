@@ -239,21 +239,17 @@ fn get_selected_files() -> Vec<String> {
             let mut views = Vec::new();
 
             // 1. Escritorio
-            let mut dispatch = None;
-            let vtloc = VARIANT::from(0i32);
-            let vtempty = VARIANT::new();
+            let vtloc = VARIANT::default();
+            let vtempty = VARIANT::default();
             let mut hwnd_val = 0i32;
 
-            let _ = sw.FindWindowSW(
+            if let Ok(disp) = sw.FindWindowSW(
                 &vtloc,
                 &vtempty,
-                SWC_DESKTOP,
+                SWC_DESKTOP.0,
                 &mut hwnd_val,
-                SWFO_NEEDDISPATCH,
-                &mut dispatch,
-            );
-
-            if let Some(disp) = dispatch {
+                SWFO_NEEDDISPATCH.0 as u32,
+            ) {
                 if let Ok(provider) = disp.cast::<IServiceProvider>() {
                     if let Ok(browser) = provider.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) {
                         if let Ok(view) = browser.QueryActiveShellView() {
@@ -268,7 +264,9 @@ fn get_selected_files() -> Vec<String> {
             // 2. Ventanas abiertas del Explorador
             if let Ok(count) = sw.Count() {
                 for i in 0..count {
-                    let vti = VARIANT::from(i);
+                    let mut vti = VARIANT::default();
+                    vti.Anonymous.Anonymous.vt = VARENUM(3); // VT_I4 = 3
+                    vti.Anonymous.Anonymous.Anonymous.lVal = i;
                     if let Ok(disp) = sw.Item(&vti) {
                         if let Ok(provider) = disp.cast::<IServiceProvider>() {
                             if let Ok(browser) = provider.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) {
@@ -285,15 +283,17 @@ fn get_selected_files() -> Vec<String> {
 
             // 3. Extraer elementos seleccionados
             for fv in views {
-                if let Ok(item_array) = fv.Items::<IShellItemArray>(SVGIO_SELECTION.0 as u32) {
+                if let Ok(item_array) = fv.Items::<IShellItemArray>(SVGIO_SELECTION) {
                     if let Ok(count) = item_array.GetCount() {
                         if count > 0 {
                             for idx in 0..count {
                                 if let Ok(item) = item_array.GetItemAt(idx) {
                                     if let Ok(path) = item.GetDisplayName(SIGDN_FILESYSPATH) {
-                                        let s = path.to_string_lossy();
-                                        if !s.is_empty() && !results.contains(&s) {
-                                            results.push(s);
+                                        if let Ok(s) = path.to_string() {
+                                            CoTaskMemFree(Some(path.as_ptr() as *const _));
+                                            if !s.is_empty() && !results.contains(&s) {
+                                                results.push(s);
+                                            }
                                         }
                                     }
                                 }
