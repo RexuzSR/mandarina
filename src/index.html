@@ -51,6 +51,22 @@ function mark(i) {
 const s = i => document.getElementById('s' + i), t = i => document.getElementById('t' + i);
 const css = p => [p.x / devicePixelRatio, p.y / devicePixelRatio];
 
+// Permite que WebView2 acepte arrastres de archivos externos y muestre el cursor de copia en vez de prohibido
+window.addEventListener('dragenter', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('dragover', e => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  e.stopPropagation();
+});
+
 win.onDragDropEvent(async ({ payload: p }) => {
   if (p.type !== 'over') log('evento ' + p.type + ' ' + (p.paths || []).join('|'));
   if (p.type === 'enter') {

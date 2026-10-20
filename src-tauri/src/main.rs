@@ -255,11 +255,14 @@ fn watcher(app: tauri::AppHandle) {
             continue;
         }
         if shown { continue; }
-        if !sh { start = None; continue; }
         let (x, y) = cursor();
-        match start {
-            None => { start = Some((x, y)); log("Shift+clic detectado"); }
-            Some((sx, sy)) if (x - sx).abs().max((y - sy).abs()) > 12 => {
+        if start.is_none() {
+            start = Some((x, y));
+            if sh { log("Shift+clic detectado"); }
+        }
+        if !sh { continue; }
+        if let Some((sx, sy)) = start {
+            if (x - sx).abs().max((y - sy).abs()) > 12 {
                 let (vx, vy, vw, vh) = unsafe { (
                     GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
                     GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN)) };
@@ -268,13 +271,28 @@ fn watcher(app: tauri::AppHandle) {
                 let r = w.show(); log(&format!("overlay show ok={} en {vx},{vy} {vw}x{vh}", r.is_ok()));
                 shown = true;
             }
-            _ => {}
         }
     }
 }
 
 fn main() {
     tauri::Builder::default()
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::DragDrop(drop_event) = event {
+                match drop_event {
+                    tauri::DragDropEvent::Enter { paths, position } => {
+                        log(&format!("Rust DragEnter: {paths:?} en {position:?}"));
+                    }
+                    tauri::DragDropEvent::Drop { paths, position } => {
+                        log(&format!("Rust Drop: {paths:?} en {position:?}"));
+                    }
+                    tauri::DragDropEvent::Leave => {
+                        log("Rust DragLeave");
+                    }
+                    _ => {}
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![formats_for, convert, log_js])
         .setup(|app| {
             log("app iniciada");
