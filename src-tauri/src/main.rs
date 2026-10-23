@@ -239,26 +239,9 @@ async fn convert_folder(folder: String, target: String, window: Window) -> Resul
     // Reuse the convert command logic for progress reporting
     convert(paths, target, window).await
 }
-    let r = convert_inner(paths, target);
-    if let Err(e) = &r { let m = e.clone(); std::thread::spawn(move || aviso(&m)); }
-    r
-}
 
-#[tauri::command]
-async fn convert_folder(folder: String, target: String) -> Result<Vec<String>, String> {
-    let mut paths = Vec::new();
-    for entry in WalkDir::new(&folder) {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.file_type().is_file() {
-            paths.push(entry.path().to_string_lossy().to_string());
-        }
-    }
-    convert(paths, target).await
-}
-    let r = convert_inner(paths, target);
-    if let Err(e) = &r { let m = e.clone(); std::thread::spawn(move || aviso(&m)); }
-    r
-}
+
+
 
 /// Hook de ratón del sistema: sigue el botón izquierdo aunque Explorer esté arrastrando un archivo.
 #[cfg(windows)]
