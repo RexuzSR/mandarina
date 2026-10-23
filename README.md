@@ -37,3 +37,9 @@ Requiere Rust, Node.js y Visual Studio Build Tools (C++).
 
 ## Publicar una versión
 En GitHub: **Releases > Draft a new release**, crea la etiqueta (por ejemplo `v0.1.0`) y publica. GitHub Actions compila y adjunta el instalador y el zip portable.
+
+### Novedades
+
+- **Barra de progreso**: ahora la interfaz muestra una barra en la parte inferior durante la conversión, indicando el porcentaje completado.
+- **Conversión de carpetas**: la API expone `convert_folder` para procesar todos los archivos dentro de una carpeta de una sola vez.
+- **Compatibilidad con Microsoft Word**: en Windows, si LibreOffice falla, la aplicación usa Word (via PowerShell) como alternativa para convertir documentos Office a PDF.

@@ -13,7 +13,13 @@
   #sub{font-size:11px;font-weight:700;fill:#ff8a1f}
   .on-t{fill:#14100e;font-weight:800;font-size:15px}
 </style>
+  <style>
+    /* Progress bar */
+    #progress-container{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:80%;max-width:400px;height:24px;background:#333;border-radius:12px;overflow:hidden;display:none;box-shadow:0 2px 8px rgba(0,0,0,0.4)}
+    #progress-bar{height:100%;width:0;background:linear-gradient(90deg,#ff8a1f,#ffb84d);transition:width .2s ease}
+  </style>
 <div id="menu"><svg viewBox="-150 -150 300 300" id="svg"></svg></div>
+<div id="progress-container"><div id="progress-bar"></div></div>
 <script>
 const { invoke } = window.__TAURI__.core;
 const win = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
@@ -79,6 +85,22 @@ win.listen('open_radial', async ({ payload: p }) => {
   menu.style.left = cx + 'px'; menu.style.top = cy + 'px';
   build(paths[0].split(/[\\/]/).pop().slice(0, 14));
   menu.style.display = 'block';
+});
+
+// Listen for conversion progress events from backend
+win.listen('conversion_progress', ({ payload: p }) => {
+  const container = document.getElementById('progress-container');
+  const bar = document.getElementById('progress-bar');
+  if (container && bar) {
+    container.style.display = 'block';
+    bar.style.width = `${p}%`;
+    if (p >= 100) {
+      setTimeout(() => {
+        container.style.display = 'none';
+        bar.style.width = '0%';
+      }, 800);
+    }
+  }
 });
 
 // Actualización en tiempo real del cursor desde el watcher nativo de Rust

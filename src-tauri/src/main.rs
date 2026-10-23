@@ -2,7 +2,8 @@
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
-use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Emitter, Manager};
+use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Emitter, Manager, Window};
+use walkdir::WalkDir;
 
 const IMG: &[&str] = &["png", "jpg", "webp", "bmp", "gif", "tiff", "ico"];
 const AUD: &[&str] = &["mp3", "wav", "flac", "ogg", "m4a", "aac"];
@@ -208,7 +209,52 @@ fn aviso(msg: &str) {
 fn aviso(_: &str) {}
 
 #[tauri::command]
-async fn convert(paths: Vec<String>, target: String) -> Result<Vec<String>, String> {
+#[tauri::command]
+async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<Vec<String>, String> {
+    let total = paths.len();
+    let mut results = Vec::new();
+    for (i, p) in paths.iter().enumerate() {
+        // Convert each file individually to be able to report progress
+        let single_res = convert_inner(vec![p.clone()], target.clone())?;
+        // single_res is a Vec<String> with one element
+        if let Some(out_path) = single_res.get(0) {
+            results.push(out_path.clone());
+        }
+        // Emit progress percentage (0-100)
+        let progress = ((i + 1) as f64 / total as f64 * 100.0).round() as u8;
+        let _ = window.emit("conversion_progress", progress);
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+async fn convert_folder(folder: String, target: String, window: Window) -> Result<Vec<String>, String> {
+    let mut paths = Vec::new();
+    for entry in WalkDir::new(&folder) {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().is_file() {
+            paths.push(entry.path().to_string_lossy().to_string());
+        }
+    }
+    // Reuse the convert command logic for progress reporting
+    convert(paths, target, window).await
+}
+    let r = convert_inner(paths, target);
+    if let Err(e) = &r { let m = e.clone(); std::thread::spawn(move || aviso(&m)); }
+    r
+}
+
+#[tauri::command]
+async fn convert_folder(folder: String, target: String) -> Result<Vec<String>, String> {
+    let mut paths = Vec::new();
+    for entry in WalkDir::new(&folder) {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().is_file() {
+            paths.push(entry.path().to_string_lossy().to_string());
+        }
+    }
+    convert(paths, target).await
+}
     let r = convert_inner(paths, target);
     if let Err(e) = &r { let m = e.clone(); std::thread::spawn(move || aviso(&m)); }
     r
@@ -422,7 +468,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![formats_for, convert, log_js])
+        .invoke_handler(tauri::generate_handler![formats_for, convert, convert_folder, log_js])
         .setup(|app| {
             log("app iniciada");
             let quit = MenuItem::with_id(app, "quit", "Salir de Mandarina", true, None::<&str>)?;
