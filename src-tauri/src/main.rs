@@ -209,7 +209,7 @@ fn aviso(msg: &str) {
 fn aviso(_: &str) {}
 
 #[tauri::command]
-#[tauri::command]
+
 async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<Vec<String>, String> {
     let total = paths.len();
     let mut results = Vec::new();
