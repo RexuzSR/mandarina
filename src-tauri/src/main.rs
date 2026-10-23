@@ -87,6 +87,23 @@ fn soffice(src: &Path, target: &str, out: &Path) -> Result<(), String> {
     r
 }
 
+#[cfg(windows)]
+fn ms_word_convert(src: &Path, out: &Path) -> Result<(), String> {
+    // Use PowerShell COM automation to convert Word documents to PDF
+    let src_str = src.to_string_lossy().replace('\\', "\\\\");
+    let out_str = out.to_string_lossy().replace('\\', "\\\\");
+    let script = format!(
+        "$word = New-Object -ComObject Word.Application; \
+         $doc = $word.Documents.Open('{}'); \
+         $doc.SaveAs([ref] '{}', [ref] 17); \
+         $doc.Close(); $word.Quit();",
+        src_str, out_str
+    );
+    let mut c = std::process::Command::new("powershell");
+    c.args(["-NoProfile", "-Command", &script]);
+    run(&mut c, "Microsoft Word")
+}
+
 /// Markdown con pandoc.
 fn pandoc(src: &Path, target: &str, out: &Path) -> Result<(), String> {
     let mut c = std::process::Command::new("pandoc");
@@ -154,7 +171,16 @@ fn convert_inner(paths: Vec<String>, target: String) -> Result<Vec<String>, Stri
             let img = if target == "jpg" || target == "bmp" { image::DynamicImage::ImageRgb8(img.to_rgb8()) } else { img };
             img.save(&out).map_err(|e| e.to_string())?; out
         } else if OFFICE.contains(&e.as_str()) || TEXTDOC.contains(&e.as_str()) {
-            soffice(src, &target, &out)?; out
+            // Try LibreOffice first, fall back to Microsoft Word if needed
+            let res = soffice(src, &target, &out).or_else(|_| {
+                #[cfg(windows)] {
+                    ms_word_convert(src, &out)
+                }
+                #[cfg(not(windows))] {
+                    Err("LibreOffice conversion failed and no Microsoft Word fallback on non-Windows".to_string())
+                }
+            })?;
+            out
         } else if MD.contains(&e.as_str()) {
             pandoc(src, &target, &out)?; out
         } else if PDF.contains(&e.as_str()) {
