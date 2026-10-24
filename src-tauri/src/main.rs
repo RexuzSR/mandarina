@@ -209,21 +209,80 @@ fn aviso(msg: &str) {
 fn aviso(_: &str) {}
 
 #[tauri::command]
-
 async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<Vec<String>, String> {
     let total = paths.len();
     let mut results = Vec::new();
-    for (i, p) in paths.iter().enumerate() {
-        // Convert each file individually to be able to report progress
-        let single_res = convert_inner(vec![p.clone()], target.clone())?;
-        // single_res is a Vec<String> with one element
-        if let Some(out_path) = single_res.get(0) {
-            results.push(out_path.clone());
+
+    // Get the progress window and position it at bottom-right of the primary monitor
+    let progress_win = window.app_handle().get_webview_window("progress");
+    if let Some(ref pw) = progress_win {
+        #[cfg(windows)]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+            let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+            let win_w = 340i32;
+            let win_h = 120i32;
+            let _ = pw.set_position(tauri::PhysicalPosition::new(sw - win_w - 16, sh - win_h - 50));
+            let _ = pw.set_size(tauri::PhysicalSize::new(win_w as u32, win_h as u32));
         }
-        // Emit progress percentage (0-100)
-        let progress = ((i + 1) as f64 / total as f64 * 100.0).round() as u8;
-        let _ = window.emit("conversion_progress", progress);
+        let _ = pw.show();
     }
+
+    for (i, p) in paths.iter().enumerate() {
+        let file_name = Path::new(&p).file_name().and_then(|n| n.to_str()).unwrap_or("archivo").to_string();
+
+        // Notify start of this file
+        if let Some(ref pw) = progress_win {
+            let _ = pw.emit("progress_start", serde_json::json!({
+                "file": file_name,
+                "target": target,
+                "current": i + 1,
+                "total": total
+            }));
+            // Small delay so the UI can render the start state
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        // Convert
+        let result = convert_inner(vec![p.clone()], target.clone());
+
+        match result {
+            Ok(single_res) => {
+                if let Some(out_path) = single_res.get(0) {
+                    results.push(out_path.clone());
+                }
+                // Update progress bar
+                let progress = ((i + 1) as f64 / total as f64 * 100.0).round() as u8;
+                if let Some(ref pw) = progress_win {
+                    let _ = pw.emit("progress_update", progress);
+                }
+            }
+            Err(e) => {
+                if let Some(ref pw) = progress_win {
+                    let _ = pw.emit("progress_done", serde_json::json!({
+                        "success": false,
+                        "error": e.to_string()
+                    }));
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    // Notify completion
+    if let Some(ref pw) = progress_win {
+        let _ = pw.emit("progress_done", serde_json::json!({
+            "success": true,
+            "output": results.last().unwrap_or(&String::new())
+        }));
+        // Auto-hide after a delay
+        let pw_clone = pw.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(3200));
+            let _ = pw_clone.hide();
+        });
+    }
+
     Ok(results)
 }
 
