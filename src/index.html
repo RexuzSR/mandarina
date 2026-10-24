@@ -93,14 +93,31 @@ win.listen('cursor_move', ({ payload: p }) => {
   }
 });
 
-// Conversión al soltar el botón izquierdo
-win.listen('mouse_up', () => {
+let isConverting = false;
+
+function triggerConvert() {
   const i = fmts.length ? sel : -1;
   menu.style.display = 'none';
-  if (i >= 0 && paths.length) {
-    log('convirtiendo ' + paths[0] + ' a ' + fmts[i]);
-    invoke('convert', { paths, target: fmts[i] }).catch(e => console.error(e));
+  if (i >= 0 && paths.length > 0 && !isConverting) {
+    isConverting = true;
+    const currentPaths = [...paths];
+    const targetFmt = fmts[i];
+    // Clear immediately to prevent any second trigger
+    paths = [];
+    sel = -1;
+    fmts = [];
+    log('convirtiendo ' + currentPaths[0] + ' a ' + targetFmt);
+    invoke('convert', { paths: currentPaths, target: targetFmt })
+      .catch(e => log('error convert: ' + e))
+      .finally(() => {
+        setTimeout(() => { isConverting = false; }, 400);
+      });
   }
+}
+
+// Conversión al soltar el botón izquierdo
+win.listen('mouse_up', () => {
+  triggerConvert();
 });
 
 // Eventos del DOM estándar
@@ -127,11 +144,7 @@ window.addEventListener('dragenter', acceptDrag);
 window.addEventListener('dragover', acceptDrag);
 document.addEventListener('drop', e => {
   e.preventDefault();
-  const i = fmts.length ? sel : -1;
-  menu.style.display = 'none';
-  if (i >= 0 && paths.length) {
-    invoke('convert', { paths, target: fmts[i] }).catch(err => console.error(err));
-  }
+  triggerConvert();
 });
 </script>
 </html>

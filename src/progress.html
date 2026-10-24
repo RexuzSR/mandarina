@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Mandarina – Progreso</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+      user-select: none;
+      cursor: default;
+    }
+
+    #toast {
+      position: absolute;
+      bottom: 8px; right: 8px; left: 8px; top: 8px;
+      background: rgba(24, 20, 18, 0.95);
+      backdrop-filter: blur(20px) saturate(1.8);
+      -webkit-backdrop-filter: blur(20px) saturate(1.8);
+      border: 1px solid rgba(255, 138, 31, 0.3);
+      border-radius: 12px;
+      padding: 12px 14px 10px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.65), 0 0 15px rgba(255, 138, 31, 0.15);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .icon {
+      font-size: 15px;
+      line-height: 1;
+    }
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: #f0e4d6;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+    .percent {
+      font-size: 13px;
+      font-weight: 700;
+      color: #ff8a1f;
+      min-width: 38px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      transition: color 0.3s ease;
+    }
+
+    .bar-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+      margin: 8px 0 6px;
+    }
+    .bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #ff8a1f 0%, #ffb84d 60%, #ffe0a3 100%);
+      border-radius: 3px;
+      transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+    .bar-fill::after {
+      content: '';
+      position: absolute;
+      top: 0; right: 0; bottom: 0; left: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.35) 50%, transparent 100%);
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+
+    .status {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(240, 228, 214, 0.6);
+      letter-spacing: 0.15px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Success state */
+    #toast.done {
+      border-color: rgba(52, 211, 153, 0.5);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.65), 0 0 15px rgba(52, 211, 153, 0.2);
+    }
+    #toast.done .bar-fill {
+      background: linear-gradient(90deg, #10b981, #34d399);
+    }
+    #toast.done .bar-fill::after { animation: none; }
+    #toast.done .percent { color: #34d399; }
+    #toast.done .status { color: #34d399; }
+
+    /* Error state */
+    #toast.error {
+      border-color: rgba(248, 113, 113, 0.5);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.65), 0 0 15px rgba(248, 113, 113, 0.2);
+    }
+    #toast.error .bar-fill {
+      background: linear-gradient(90deg, #ef4444, #f87171);
+    }
+    #toast.error .bar-fill::after { animation: none; }
+    #toast.error .percent { color: #f87171; }
+    #toast.error .status { color: #f87171; }
+  </style>
+</head>
+<body>
+  <div id="toast">
+    <div class="header">
+      <span class="title">
+        <span class="icon">🍊</span>
+        <span id="filename">Convirtiendo...</span>
+      </span>
+      <span class="percent" id="percent">0%</span>
+    </div>
+    <div class="bar-track">
+      <div class="bar-fill" id="bar"></div>
+    </div>
+    <div class="status" id="status">Iniciando conversión...</div>
+  </div>
+
+  <script>
+    const win = window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+    const toast = document.getElementById('toast');
+    const filename = document.getElementById('filename');
+    const percent = document.getElementById('percent');
+    const bar = document.getElementById('bar');
+    const status = document.getElementById('status');
+
+    let currentVal = 0;
+    let ticker = null;
+
+    function setProgress(val) {
+      currentVal = Math.max(0, Math.min(100, val));
+      bar.style.width = currentVal + '%';
+      percent.textContent = Math.round(currentVal) + '%';
+    }
+
+    // Tick smoothly while waiting for large conversions
+    function startTicker() {
+      clearInterval(ticker);
+      ticker = setInterval(() => {
+        if (currentVal < 88) {
+          setProgress(currentVal + (88 - currentVal) * 0.08);
+        }
+      }, 250);
+    }
+
+    win.listen('progress_start', ({ payload: p }) => {
+      clearInterval(ticker);
+      toast.className = '';
+      currentVal = 5;
+      setProgress(5);
+      const name = p.file || 'archivo';
+      const tgt = (p.target || '').toUpperCase();
+      if (p.total > 1) {
+        filename.textContent = `${name} ➔ .${tgt} (${p.current}/${p.total})`;
+      } else {
+        filename.textContent = `${name} ➔ .${tgt}`;
+      }
+      status.textContent = 'Procesando conversión...';
+      startTicker();
+    });
+
+    win.listen('progress_update', ({ payload: p }) => {
+      clearInterval(ticker);
+      setProgress(p);
+      status.textContent = 'Convirtiendo...';
+    });
+
+    win.listen('progress_done', ({ payload: p }) => {
+      clearInterval(ticker);
+      if (p.success) {
+        setProgress(100);
+        toast.className = 'done';
+        status.textContent = '✓ Listo';
+      } else {
+        toast.className = 'error';
+        status.textContent = '✗ Error: ' + (p.error || 'falló').slice(0, 70);
+      }
+    });
+  </script>
+</body>
+</html>

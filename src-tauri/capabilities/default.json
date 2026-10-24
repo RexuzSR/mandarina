@@ -1,1 +1,1 @@
-{"identifier":"default","windows":["overlay"],"permissions":["core:default","notification:default"]}
+{"identifier":"default","windows":["overlay","progress"],"permissions":["core:default"]}
