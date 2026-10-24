@@ -215,6 +215,7 @@ async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<V
 
     // Get the progress window and position it at bottom-right of the primary monitor
     let progress_win = window.app_handle().get_webview_window("progress");
+    log(&format!("progress_win encontrada: {}", progress_win.is_some()));
     if let Some(ref pw) = progress_win {
         #[cfg(windows)]
         {
@@ -224,8 +225,12 @@ async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<V
             let win_h = 120i32;
             let _ = pw.set_position(tauri::PhysicalPosition::new(sw - win_w - 16, sh - win_h - 50));
             let _ = pw.set_size(tauri::PhysicalSize::new(win_w as u32, win_h as u32));
+            log(&format!("progress posición: {}x{} en ({},{})", win_w, win_h, sw - win_w - 16, sh - win_h - 50));
         }
-        let _ = pw.show();
+        let show_result = pw.show();
+        log(&format!("progress show: {:?}", show_result));
+        // Give the window time to actually appear
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
     for (i, p) in paths.iter().enumerate() {
@@ -239,12 +244,17 @@ async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<V
                 "current": i + 1,
                 "total": total
             }));
-            // Small delay so the UI can render the start state
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            log(&format!("progress_start emitido: {} -> {}", file_name, target));
+            // Let the UI render
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
 
-        // Convert
-        let result = convert_inner(vec![p.clone()], target.clone());
+        // Convert on a blocking thread so we don't freeze the async runtime
+        let p_clone = p.clone();
+        let target_clone = target.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            convert_inner(vec![p_clone], target_clone)
+        }).await.map_err(|e| e.to_string())?;
 
         match result {
             Ok(single_res) => {
@@ -255,14 +265,22 @@ async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<V
                 let progress = ((i + 1) as f64 / total as f64 * 100.0).round() as u8;
                 if let Some(ref pw) = progress_win {
                     let _ = pw.emit("progress_update", progress);
+                    log(&format!("progress_update: {}%", progress));
                 }
             }
             Err(e) => {
+                log(&format!("conversion error: {}", e));
                 if let Some(ref pw) = progress_win {
                     let _ = pw.emit("progress_done", serde_json::json!({
                         "success": false,
                         "error": e.to_string()
                     }));
+                    // Hide after showing the error
+                    let pw_clone = pw.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(4500));
+                        let _ = pw_clone.hide();
+                    });
                 }
                 return Err(e);
             }
@@ -275,6 +293,7 @@ async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<V
             "success": true,
             "output": results.last().unwrap_or(&String::new())
         }));
+        log("progress_done emitido (éxito)");
         // Auto-hide after a delay
         let pw_clone = pw.clone();
         std::thread::spawn(move || {
