@@ -13,13 +13,6 @@
         "transparent": true, "decorations": false, "alwaysOnTop": true,
         "skipTaskbar": true, "visible": false, "focus": false,
         "shadow": false, "resizable": false, "dragDropEnabled": false
-      },
-      {
-        "label": "progress", "url": "progress.html",
-        "transparent": true, "decorations": false, "alwaysOnTop": true,
-        "skipTaskbar": true, "visible": false, "focus": false,
-        "shadow": false, "resizable": false, "dragDropEnabled": false,
-        "width": 340, "height": 120
       }
     ]
   },

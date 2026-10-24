@@ -2,7 +2,8 @@
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
-use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Emitter, Manager, Window};
+use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 use walkdir::WalkDir;
 
 const IMG: &[&str] = &["png", "jpg", "webp", "bmp", "gif", "tiff", "ico"];
@@ -209,104 +210,78 @@ fn aviso(msg: &str) {
 fn aviso(_: &str) {}
 
 #[tauri::command]
-async fn convert(paths: Vec<String>, target: String, window: Window) -> Result<Vec<String>, String> {
+fn convert(paths: Vec<String>, target: String, app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let total = paths.len();
-    let mut results = Vec::new();
-
-    // Get the progress window and position it at bottom-right of the primary monitor
-    let progress_win = window.app_handle().get_webview_window("progress");
-    log(&format!("progress_win encontrada: {}", progress_win.is_some()));
-    if let Some(ref pw) = progress_win {
-        #[cfg(windows)]
-        {
-            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-            let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
-            let win_w = 340i32;
-            let win_h = 120i32;
-            let _ = pw.set_position(tauri::PhysicalPosition::new(sw - win_w - 16, sh - win_h - 50));
-            let _ = pw.set_size(tauri::PhysicalSize::new(win_w as u32, win_h as u32));
-            log(&format!("progress posición: {}x{} en ({},{})", win_w, win_h, sw - win_w - 16, sh - win_h - 50));
-        }
-        let show_result = pw.show();
-        log(&format!("progress show: {:?}", show_result));
-        // Give the window time to actually appear
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    if total == 0 {
+        return Ok(vec![]);
     }
 
-    for (i, p) in paths.iter().enumerate() {
-        let file_name = Path::new(&p).file_name().and_then(|n| n.to_str()).unwrap_or("archivo").to_string();
+    let target_upper = target.to_uppercase();
 
-        // Notify start of this file
-        if let Some(ref pw) = progress_win {
-            let _ = pw.emit("progress_start", serde_json::json!({
-                "file": file_name,
-                "target": target,
-                "current": i + 1,
-                "total": total
-            }));
-            log(&format!("progress_start emitido: {} -> {}", file_name, target));
-            // Let the UI render
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
+    // Notificación nativa de inicio
+    let initial_msg = if total == 1 {
+        let name = Path::new(&paths[0])
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("archivo");
+        format!("Convirtiendo {} a {}...", name, target_upper)
+    } else {
+        format!("Convirtiendo {} archivos a {}...", total, target_upper)
+    };
 
-        // Convert on a blocking thread so we don't freeze the async runtime
-        let p_clone = p.clone();
-        let target_clone = target.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            convert_inner(vec![p_clone], target_clone)
-        }).await.map_err(|e| e.to_string())?;
+    log(&format!("inicio conversion: {}", initial_msg));
+    let _ = app.notification().builder()
+        .title("Mandarina")
+        .body(initial_msg)
+        .show();
 
-        match result {
+    let mut results = Vec::new();
+
+    for p in &paths {
+        let file_name = Path::new(p)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("archivo");
+
+        match convert_inner(vec![p.clone()], target.clone()) {
             Ok(single_res) => {
-                if let Some(out_path) = single_res.get(0) {
-                    results.push(out_path.clone());
-                }
-                // Update progress bar
-                let progress = ((i + 1) as f64 / total as f64 * 100.0).round() as u8;
-                if let Some(ref pw) = progress_win {
-                    let _ = pw.emit("progress_update", progress);
-                    log(&format!("progress_update: {}%", progress));
+                if let Some(out_path) = single_res.into_iter().next() {
+                    results.push(out_path);
                 }
             }
             Err(e) => {
-                log(&format!("conversion error: {}", e));
-                if let Some(ref pw) = progress_win {
-                    let _ = pw.emit("progress_done", serde_json::json!({
-                        "success": false,
-                        "error": e.to_string()
-                    }));
-                    // Hide after showing the error
-                    let pw_clone = pw.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(4500));
-                        let _ = pw_clone.hide();
-                    });
-                }
+                log(&format!("error convirtiendo {}: {}", file_name, e));
+                let _ = app.notification().builder()
+                    .title("Mandarina - Error")
+                    .body(format!("Error en {}: {}", file_name, e))
+                    .show();
                 return Err(e);
             }
         }
     }
 
-    // Notify completion
-    if let Some(ref pw) = progress_win {
-        let _ = pw.emit("progress_done", serde_json::json!({
-            "success": true,
-            "output": results.last().unwrap_or(&String::new())
-        }));
-        log("progress_done emitido (éxito)");
-        // Auto-hide after a delay
-        let pw_clone = pw.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(3200));
-            let _ = pw_clone.hide();
-        });
-    }
+    // Notificación nativa de éxito
+    let done_msg = if total == 1 {
+        let out_name = results.first()
+            .and_then(|p| Path::new(p).file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("archivo");
+        format!("¡Listo! Guardado como {}", out_name)
+    } else {
+        format!("¡Listo! {} archivos convertidos a {}.", results.len(), target_upper)
+    };
+
+    log(&format!("fin conversion: {}", done_msg));
+    let _ = app.notification().builder()
+        .title("Mandarina")
+        .body(done_msg)
+        .show();
 
     Ok(results)
 }
 
 #[tauri::command]
-async fn convert_folder(folder: String, target: String, window: Window) -> Result<Vec<String>, String> {
+fn convert_folder(folder: String, target: String, app: tauri::AppHandle) -> Result<Vec<String>, String> {
     let mut paths = Vec::new();
     for entry in WalkDir::new(&folder) {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -314,8 +289,10 @@ async fn convert_folder(folder: String, target: String, window: Window) -> Resul
             paths.push(entry.path().to_string_lossy().to_string());
         }
     }
-    // Reuse the convert command logic for progress reporting
-    convert(paths, target, window).await
+    if paths.is_empty() {
+        return Err("No se encontraron archivos en la carpeta".into());
+    }
+    convert(paths, target, app)
 }
 
 
@@ -513,6 +490,7 @@ fn watcher(app: tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::DragDrop(drop_event) = event {
                 match drop_event {
