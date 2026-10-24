@@ -82,6 +82,7 @@
       font-size: 13.5px;
       font-weight: 700;
       background: linear-gradient(135deg, #7dd3fc 0%, #38bdf8 50%, #60a5fa 100%);
+      background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.45));
@@ -147,9 +148,10 @@
       background: linear-gradient(90deg, #059669 0%, #10b981 50%, #34d399 100%);
       box-shadow: 0 0 12px rgba(52, 211, 153, 0.75);
     }
-    #toast.done .bar-fill::after { animation: none; }
+    #toast.done .bar-fill::after { display: none; }
     #toast.done .percent {
       background: linear-gradient(135deg, #a7f3d0 0%, #34d399 100%);
+      background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.5));
@@ -172,9 +174,10 @@
       background: linear-gradient(90deg, #dc2626 0%, #ef4444 50%, #f87171 100%);
       box-shadow: 0 0 12px rgba(248, 113, 113, 0.75);
     }
-    #toast.error .bar-fill::after { animation: none; }
+    #toast.error .bar-fill::after { display: none; }
     #toast.error .percent {
       background: linear-gradient(135deg, #fecaca 0%, #f87171 100%);
+      background-clip: text;
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       filter: drop-shadow(0 0 8px rgba(248, 113, 113, 0.5));
@@ -212,6 +215,10 @@
     let currentVal = 0;
     let ticker = null;
 
+    const escapeHtml = str => String(str).replace(/[&<>"']/g, m => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[m]);
+
     function setProgress(val) {
       currentVal = Math.max(0, Math.min(100, val));
       bar.style.width = currentVal + '%';
@@ -233,8 +240,8 @@
       toast.className = '';
       currentVal = 5;
       setProgress(5);
-      const name = p.file || 'archivo';
-      const tgt = (p.target || '').toUpperCase();
+      const name = escapeHtml(p.file || 'archivo');
+      const tgt = escapeHtml((p.target || '').toUpperCase());
       if (p.total > 1) {
         filename.innerHTML = `${name} <span class="arrow">➔</span> <span class="target">.${tgt}</span> <span class="counter">(${p.current}/${p.total})</span>`;
       } else {
@@ -255,9 +262,11 @@
       if (p.success) {
         setProgress(100);
         toast.className = 'done';
-        status.textContent = '✓ Listo';
+        status.textContent = p.output ? `✓ Listo: ${escapeHtml(p.output)}` : '✓ Listo';
       } else {
         toast.className = 'error';
+        bar.style.width = '100%';
+        percent.textContent = '✗';
         status.textContent = '✗ Error: ' + (p.error || 'falló').slice(0, 70);
       }
     });

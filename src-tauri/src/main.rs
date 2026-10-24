@@ -36,7 +36,7 @@ fn formats_for(path: String) -> Vec<String> {
         else if OFFICE.contains(&e.as_str()) { &["pdf", "docx", "odt", "txt", "html"] }
         else if TEXTDOC.contains(&e.as_str()) { &["pdf", "docx", "odt"] }
         else if MD.contains(&e.as_str()) { &["docx", "html", "txt", "epub"] }
-        else if PDF.contains(&e.as_str()) { &["png", "jpg", "txt"] }
+        else if PDF.contains(&e.as_str()) { &["docx", "png", "jpg", "txt"] }
         else if AUD.contains(&e.as_str()) { &["mp3", "wav", "flac", "ogg", "m4a", "aac"] }
         else if VID.contains(&e.as_str()) { &["mp4", "webm", "mkv", "mov", "gif", "mp3"] }
         else { &[] };
@@ -95,14 +95,72 @@ fn ms_word_convert(src: &Path, out: &Path) -> Result<(), String> {
     let out_str = out.to_string_lossy().replace('\\', "\\\\");
     let script = format!(
         "$word = New-Object -ComObject Word.Application; \
-         $doc = $word.Documents.Open('{}'); \
-         $doc.SaveAs([ref] '{}', [ref] 17); \
-         $doc.Close(); $word.Quit();",
+         $word.Visible = $false; \
+         $word.DisplayAlerts = 0; \
+         try {{ \
+             $doc = $word.Documents.Open('{}'); \
+             $doc.SaveAs([ref] '{}', [ref] 17); \
+             $doc.Close(); \
+         }} finally {{ \
+             $word.Quit(); \
+         }}",
         src_str, out_str
     );
     let mut c = std::process::Command::new("powershell");
     c.args(["-NoProfile", "-Command", &script]);
     run(&mut c, "Microsoft Word")
+}
+
+#[cfg(windows)]
+fn ms_word_pdf_to_docx(src: &Path, out: &Path) -> Result<(), String> {
+    let src_str = src.to_string_lossy().replace('\\', "\\\\");
+    let out_str = out.to_string_lossy().replace('\\', "\\\\");
+    let script = format!(
+        "$word = New-Object -ComObject Word.Application; \
+         $word.Visible = $false; \
+         $word.DisplayAlerts = 0; \
+         try {{ \
+             $doc = $word.Documents.Open('{}'); \
+             $doc.SaveAs([ref] '{}', [ref] 16); \
+             $doc.Close(); \
+         }} finally {{ \
+             $word.Quit(); \
+         }}",
+        src_str, out_str
+    );
+    let mut c = std::process::Command::new("powershell");
+    c.args(["-NoProfile", "-Command", &script]);
+    run(&mut c, "Microsoft Word")
+}
+
+fn soffice_pdf_to_docx(src: &Path, out: &Path) -> Result<(), String> {
+    let bin = [r"C:\Program Files\LibreOffice\program\soffice.exe", r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"]
+        .iter().find(|p| Path::new(p).exists()).map(|p| p.to_string()).unwrap_or("soffice".into());
+    let tmp = std::env::temp_dir().join(format!("mandarina-pdf-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let profile = format!("-env:UserInstallation=file:///{}", tmp.join("perfil").to_string_lossy().replace('\\', "/"));
+    let mut c = std::process::Command::new(bin);
+    c.arg(profile)
+        .args(["--headless", "--infilter=writer_pdf_import", "--convert-to", "docx:MS Word 2007 XML", "--outdir"])
+        .arg(&tmp)
+        .arg(src);
+    let r = run(&mut c, "LibreOffice");
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("salida");
+    let made = tmp.join(format!("{stem}.docx"));
+    let r = r.and_then(|_| std::fs::copy(&made, out).map(|_| ()).map_err(|e| e.to_string()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    r
+}
+
+fn pdf_to_docx(src: &Path, out: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        ms_word_pdf_to_docx(src, out).or_else(|_| soffice_pdf_to_docx(src, out))
+    }
+    #[cfg(not(windows))]
+    {
+        soffice_pdf_to_docx(src, out)
+    }
 }
 
 /// Markdown con pandoc.
@@ -185,7 +243,11 @@ fn convert_inner(paths: Vec<String>, target: String) -> Result<Vec<String>, Stri
         } else if MD.contains(&e.as_str()) {
             pandoc(src, &target, &out)?; out
         } else if PDF.contains(&e.as_str()) {
-            pdf_tool(src, &target, &out)?
+            if target == "docx" {
+                pdf_to_docx(src, &out)?; out
+            } else {
+                pdf_tool(src, &target, &out)?
+            }
         } else {
             ffmpeg(src, &out)?; out
         };
